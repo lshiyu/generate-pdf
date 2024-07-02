@@ -3,7 +3,7 @@ const puppeteer = require('puppeteer')
 const PDFMerger = require('pdf-merger-js')
 const merger = new PDFMerger()
 
-function generate(options) {
+function generate(options, token) {
   return new Promise(async (resolve, reject) => {
     try {
       const browser = await puppeteer.launch({ args: ['--no-sandbox'], headless: true })
@@ -14,17 +14,21 @@ function generate(options) {
 
       for (let i = 0; i < options.length; i++) {
         await page.goto(options[i].url, { waitUntil: 'networkidle0' })
+        await page.evaluate(t => {
+          localStorage.setItem('XR_TOKEN', t)
+        }, token)
+        await page.goto(options[i].url, { waitUntil: 'networkidle0' })
         const buf = await page.pdf(options[i].option)
         bufList.push(buf)
         await merger.add(buf)
       }
       // 合并 buffer
       merger.saveAsBuffer().then(async buf => {
-          await browser.close()
-          resolve(buf)
-        })
+        await browser.close()
+        resolve(buf)
+        merger.reset()
+      })
     } catch (error) {
-      console.log('error', error)
       reject(error)
     }
   })
@@ -45,15 +49,14 @@ function checkParams(options) {
 }
 
 module.exports = async (req, res) => {
+  const { token } = req.headers
   const options = req.body.options
-  console.log(req.body, 'body')
   // 校验参数
   const { valid, message } = checkParams(options)
-  console.log(valid, 'valid', message)
   if (!valid) return res.status(400).send({ code: -1, message })
 
   try {
-    const pdf = await generate(options)
+    const pdf = await generate(options, token)
     res.set('Content-Type', 'application/pdf')
     res.status(200).send(pdf)
   } catch (error) {
